@@ -130,7 +130,19 @@
           progressBar = document.getElementById('progress-bar'), fileTransferInfo = document.getElementById('file-transfer-info'),
           toggleMuteBtn = document.getElementById('toggleMuteBtn');
 
-    const configuration = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+    const configuration = {
+    iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun.services.mozilla.com' },
+        {
+            urls: 'turn:openrelay.metered.ca:443',
+            username: 'openrelayproject',
+            credential: 'openrelayproject'
+        }
+    ]
+};
+
+    
     let peerConnection, localStream, dataChannel, connectionTimeout;
     let audioContext, localGainNode, remoteStreamSource, remoteGainNode;
     let incomingFileInfo = {}, transferStartTime, fileWriter, receivedFileHandle;
@@ -704,4 +716,5 @@
 </script>
 </body>
 </html>
+
 
