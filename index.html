@@ -130,19 +130,8 @@
           progressBar = document.getElementById('progress-bar'), fileTransferInfo = document.getElementById('file-transfer-info'),
           toggleMuteBtn = document.getElementById('toggleMuteBtn');
 
-    const configuration = {
-    iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun.services.mozilla.com' },
-        {
-            urls: 'turn:openrelay.metered.ca:443',
-            username: 'openrelayproject',
-            credential: 'openrelayproject'
-        }
-    ]
-};
-
-    
+    // Используем только проверенный STUN-сервер, как и было изначально.
+    const configuration = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
     let peerConnection, localStream, dataChannel, connectionTimeout;
     let audioContext, localGainNode, remoteStreamSource, remoteGainNode;
     let incomingFileInfo = {}, transferStartTime, fileWriter, receivedFileHandle;
@@ -177,17 +166,8 @@
         if (peerConnection) peerConnection.close();
         peerConnection = new RTCPeerConnection(configuration);
 
-        // ИЗМЕНЕНИЕ: Мы создаем "обещание" (Promise), которое выполнится, когда сбор кандидатов завершится.
-        // Это более надежный способ дождаться готовности, чем просто установка обработчика.
-        peerConnection.iceGatheringPromise = new Promise(resolve => {
-            peerConnection.onicecandidate = e => {
-                if (!e.candidate) {
-                    resolve();
-                }
-            };
-        });
-        
-        await setupLocalMedia();
+        // ИЗМЕНЕНИЕ №1: Вешаем все обработчики СРАЗУ при инициализации,
+        // до того, как будут созданы offer или answer.
         peerConnection.ontrack = event => {
             remoteAudio.srcObject = event.streams[0];
             setupRemoteAudioProcessing(event.streams[0]);
@@ -207,6 +187,9 @@
                 forceDisconnect();
             }
         };
+        
+        // Запрашиваем доступ к микрофону
+        await setupLocalMedia();
     }
 
     createRequestBtn.onclick = async () => {
@@ -215,16 +198,21 @@
             await initializePeerConnection();
             dataChannel = peerConnection.createDataChannel("data", { ordered: true });
             setupDataChannelHandlers();
+
+            // ИЗМЕНЕНИЕ №2: Назначаем обработчик onicecandidate ДО вызова setLocalDescription.
+            // Теперь он гарантированно сработает.
+            peerConnection.onicecandidate = e => {
+                // Ждем, пока сбор кандидатов не завершится (e.candidate будет null)
+                if (e.candidate) return;
+                
+                // Как только сбор завершен, peerConnection.localDescription содержит ВСЕ кандидаты.
+                // Копируем готовый код приглашения.
+                navigator.clipboard.writeText(btoa(JSON.stringify({ type: 'offer', sdp: peerConnection.localDescription })));
+                statusEl.textContent = 'Код приглашения скопирован. Отправьте его.';
+            };
+            
             const offer = await peerConnection.createOffer();
-            await peerConnection.setLocalDescription(offer);
-
-            // ИЗМЕНЕНИЕ: Ждем выполнения нашего Promise, который мы создали в initializePeerConnection.
-            // Этот `await` остановит выполнение функции, пока все кандидаты не будут собраны.
-            await peerConnection.iceGatheringPromise;
-
-            // Этот код выполнится только после того, как все кандидаты (включая сетевые) будут собраны.
-            navigator.clipboard.writeText(btoa(JSON.stringify({ type: 'offer', sdp: peerConnection.localDescription })));
-            statusEl.textContent = 'Код приглашения скопирован. Отправьте его.';
+            await peerConnection.setLocalDescription(offer); // Этот вызов запускает сбор кандидатов
 
         } catch (err) { console.error("Failed to create offer:", err); }
     };
@@ -234,26 +222,34 @@
         if (code.length < 50) return;
         let payload;
         try { payload = JSON.parse(atob(code)); } catch { return; }
+        
         if (payload.type === 'offer') {
             try {
                 await initializePeerConnection();
+                
+                // ИЗМЕНЕНИЕ №3: Точно такая же логика для отвечающего.
+                // Назначаем обработчик ЗАРАНЕЕ.
+                peerConnection.onicecandidate = e => {
+                    if (e.candidate) return;
+                    navigator.clipboard.writeText(btoa(JSON.stringify({ type: 'answer', sdp: peerConnection.localDescription })));
+                    statusEl.textContent = 'Ответ создан и скопирован.';
+                };
+
                 await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.sdp));
                 const answer = await peerConnection.createAnswer();
-                await peerConnection.setLocalDescription(answer);
-                
-                // ИЗМЕНЕНИЕ: Точно так же ждем завершения сбора кандидатов для "ответа".
-                await peerConnection.iceGatheringPromise;
-                
-                // И только потом копируем готовый ответ.
-                navigator.clipboard.writeText(btoa(JSON.stringify({ type: 'answer', sdp: peerConnection.localDescription })));
-                statusEl.textContent = 'Ответ создан и скопирован.';
+                await peerConnection.setLocalDescription(answer); // Запускаем сбор кандидатов
 
             } catch (err) { console.error("Failed to handle offer:", err); }
         } else if (payload.type === 'answer') {
             try {
+                // Устанавливаем remote description только после того, как он был создан
+                if (!peerConnection) {
+                    statusEl.textContent = 'Ошибка: сначала создайте запрос на звонок.';
+                    return;
+                }
                 await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.sdp));
                 statusEl.textContent = 'Подключение...';
-                connectionTimeout = setTimeout(() => { statusEl.textContent = 'Не удалось подключиться (тайм-аут).'; forceDisconnect(); }, 10000);
+                connectionTimeout = setTimeout(() => { statusEl.textContent = 'Не удалось подключиться (тайм-аут).'; forceDisconnect(); }, 15000);
             } catch (err) { console.error("Failed to set remote description:", err); }
         }
     });
@@ -262,34 +258,28 @@
     function setupDataChannelHandlers() {
         dataChannel.onopen = async () => {
             statusEl.textContent = 'Канал открыт. Инициализация шифрования...';
-            // 1. Generate our long-term identity keys
             myIdentityKeys = await crypto.subtle.generateKey(ECDH_PARAMS, true, ['deriveKey', 'deriveBits']);
             const exportedPubKey = await crypto.subtle.exportKey('raw', myIdentityKeys.publicKey);
-            // 2. Send our public key to the peer
             dataChannel.send(JSON.stringify({
                 type: 'crypto-handshake',
-                key: Array.from(new Uint8Array(exportedPubKey)) // Convert ArrayBuffer to array for JSON
+                key: Array.from(new Uint8Array(exportedPubKey))
             }));
         };
         dataChannel.binaryType = 'arraybuffer';
         dataChannel.onmessage = async (event) => {
             if (typeof event.data === 'string') {
-                // Unencrypted messages are only for crypto handshake
                 const msg = JSON.parse(event.data);
                 if (msg.type === 'crypto-handshake') {
                     const pubKeyBuffer = new Uint8Array(msg.key);
                     peerIdentityKey = await crypto.subtle.importKey('raw', pubKeyBuffer, ECDH_PARAMS, true, []);
                     console.log("Peer public key received and imported.");
-                    // If we have both keys, we are ready
                     if (myIdentityKeys && peerIdentityKey) {
                         cryptoReady = true;
                         statusEl.textContent = 'Шифрование установлено. Канал защищен.';
-                        // Send first encrypted message (nickname)
                         await encryptAndSend({ type: 'nickname', value: nicknameInput.value || 'Anonymous' });
                     }
                 }
             } else {
-                // All other messages must be encrypted ArrayBuffers
                 await decryptAndProcess(event.data);
             }
         };
@@ -373,18 +363,12 @@
     // --- E2EE Crypto Functions ---
     async function encryptAndSend(payload, isBinary = false) {
         if (!cryptoReady) { console.error("Crypto not ready, cannot send message."); return; }
-
-        // 1. Generate a new ephemeral key pair for this message
         const ephemeralKeys = await crypto.subtle.generateKey(ECDH_PARAMS, true, ['deriveBits']);
-
-        // 2. Derive a shared secret
         const sharedSecret = await crypto.subtle.deriveBits(
             { name: 'ECDH', public: peerIdentityKey },
             ephemeralKeys.privateKey,
             256
         );
-
-        // 3. Use HKDF to derive a symmetric key from the shared secret
         const hkdfKey = await crypto.subtle.importKey('raw', sharedSecret, HKDF_PARAMS, false, ['deriveKey']);
         const aesKey = await crypto.subtle.deriveKey(
             { ...HKDF_PARAMS, salt: new Uint8Array(16), info: new Uint8Array() },
@@ -393,49 +377,33 @@
             true,
             ['encrypt']
         );
-
-        // 4. Prepare plaintext and IV
         const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
         let plaintext;
         if (isBinary) {
-            plaintext = payload; // payload is already an ArrayBuffer
+            plaintext = payload;
         } else {
             plaintext = new TextEncoder().encode(JSON.stringify(payload));
         }
-
-        // 5. Encrypt the data
         const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, plaintext);
-
-        // 6. Export the ephemeral public key to send it
         const exportedEphemeralPub = await crypto.subtle.exportKey('raw', ephemeralKeys.publicKey);
-
-        // 7. Construct and send the final packet: [ephemeralPubKey (65 bytes)][IV (12 bytes)][ciphertext]
         const finalPacket = new Uint8Array(EPHEMERAL_KEY_LENGTH + IV_LENGTH + ciphertext.byteLength);
         finalPacket.set(new Uint8Array(exportedEphemeralPub), 0);
         finalPacket.set(iv, EPHEMERAL_KEY_LENGTH);
         finalPacket.set(new Uint8Array(ciphertext), EPHEMERAL_KEY_LENGTH + IV_LENGTH);
-
         dataChannel.send(finalPacket.buffer);
     }
 
     async function decryptAndProcess(packet) {
         try {
-            // 1. Deconstruct the packet
             const receivedEphemeralPubRaw = packet.slice(0, EPHEMERAL_KEY_LENGTH);
             const iv = packet.slice(EPHEMERAL_KEY_LENGTH, EPHEMERAL_KEY_LENGTH + IV_LENGTH);
             const ciphertext = packet.slice(EPHEMERAL_KEY_LENGTH + IV_LENGTH);
-
-            // 2. Import the ephemeral public key
             const receivedEphemeralPub = await crypto.subtle.importKey('raw', receivedEphemeralPubRaw, ECDH_PARAMS, true, []);
-
-            // 3. Derive the same shared secret
             const sharedSecret = await crypto.subtle.deriveBits(
                 { name: 'ECDH', public: receivedEphemeralPub },
                 myIdentityKeys.privateKey,
                 256
             );
-            
-            // 4. Derive the same symmetric key
             const hkdfKey = await crypto.subtle.importKey('raw', sharedSecret, HKDF_PARAMS, false, ['deriveKey']);
             const aesKey = await crypto.subtle.deriveKey(
                 { ...HKDF_PARAMS, salt: new Uint8Array(16), info: new Uint8Array() },
@@ -444,17 +412,11 @@
                 true,
                 ['decrypt']
             );
-            
-            // 5. Decrypt and get the original plaintext buffer
             const decryptedPlaintextBuffer = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, ciphertext);
-
-            // 6. Process the plaintext - it could be JSON or a binary file chunk
             try {
-                // Try to parse as JSON first
                 const payload = JSON.parse(new TextDecoder().decode(decryptedPlaintextBuffer));
                 handleTextMessage(payload);
             } catch (e) {
-                // If it fails, it must be a binary file chunk
                 handleBinaryMessage(decryptedPlaintextBuffer);
             }
         } catch (error) {
@@ -473,7 +435,8 @@
             const destination = audioContext.createMediaStreamDestination();
             source.connect(localGainNode).connect(destination);
             handleSendVolumeChange();
-            peerConnection.addTrack(destination.stream.getAudioTracks()[0], destination.stream);
+            // Добавляем трек в peerConnection
+            localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
         } catch (e) {
             statusEl.textContent = e.name === "NotAllowedError" ? 'Ошибка: Вы не разрешили доступ к микрофону.' : 'Ошибка: Не удалось инициализировать микрофон.';
             console.error("Error in setupLocalMedia:", e);
@@ -529,7 +492,6 @@
         chatArea.innerHTML = ''; 
         resetFileTransferUI();
         revokeDownloadLink();
-        // Reset crypto state
         cryptoReady = false; myIdentityKeys = null; peerIdentityKey = null;
     }
 
@@ -605,7 +567,7 @@
             reader.onload = async e => {
                 if (dataChannel.readyState !== 'open' || isTransferCancelled) { resetFileTransferUI(true); return; }
                 try {
-                    await encryptAndSend(e.target.result, true); // Send binary data
+                    await encryptAndSend(e.target.result, true);
                     offset += e.target.result.byteLength;
                     updateProgress(offset / fileToSend.size);
                     const elapsedTime = (new Date().getTime() - transferStartTime) / 1000;
@@ -716,5 +678,6 @@
 </script>
 </body>
 </html>
+
 
 
