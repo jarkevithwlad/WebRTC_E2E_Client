@@ -164,6 +164,17 @@
     async function initializePeerConnection() {
         if (peerConnection) peerConnection.close();
         peerConnection = new RTCPeerConnection(configuration);
+
+        // ИЗМЕНЕНИЕ: Мы создаем "обещание" (Promise), которое выполнится, когда сбор кандидатов завершится.
+        // Это более надежный способ дождаться готовности, чем просто установка обработчика.
+        peerConnection.iceGatheringPromise = new Promise(resolve => {
+            peerConnection.onicecandidate = e => {
+                if (!e.candidate) {
+                    resolve();
+                }
+            };
+        });
+        
         await setupLocalMedia();
         peerConnection.ontrack = event => {
             remoteAudio.srcObject = event.streams[0];
@@ -194,11 +205,15 @@
             setupDataChannelHandlers();
             const offer = await peerConnection.createOffer();
             await peerConnection.setLocalDescription(offer);
-            peerConnection.onicecandidate = e => {
-                if (e.candidate) return;
-                navigator.clipboard.writeText(btoa(JSON.stringify({ type: 'offer', sdp: peerConnection.localDescription })));
-                statusEl.textContent = 'Код приглашения скопирован. Отправьте его.';
-            };
+
+            // ИЗМЕНЕНИЕ: Ждем выполнения нашего Promise, который мы создали в initializePeerConnection.
+            // Этот `await` остановит выполнение функции, пока все кандидаты не будут собраны.
+            await peerConnection.iceGatheringPromise;
+
+            // Этот код выполнится только после того, как все кандидаты (включая сетевые) будут собраны.
+            navigator.clipboard.writeText(btoa(JSON.stringify({ type: 'offer', sdp: peerConnection.localDescription })));
+            statusEl.textContent = 'Код приглашения скопирован. Отправьте его.';
+
         } catch (err) { console.error("Failed to create offer:", err); }
     };
 
@@ -213,11 +228,14 @@
                 await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.sdp));
                 const answer = await peerConnection.createAnswer();
                 await peerConnection.setLocalDescription(answer);
-                peerConnection.onicecandidate = e => {
-                    if (e.candidate) return;
-                    navigator.clipboard.writeText(btoa(JSON.stringify({ type: 'answer', sdp: peerConnection.localDescription })));
-                    statusEl.textContent = 'Ответ создан и скопирован.';
-                };
+                
+                // ИЗМЕНЕНИЕ: Точно так же ждем завершения сбора кандидатов для "ответа".
+                await peerConnection.iceGatheringPromise;
+                
+                // И только потом копируем готовый ответ.
+                navigator.clipboard.writeText(btoa(JSON.stringify({ type: 'answer', sdp: peerConnection.localDescription })));
+                statusEl.textContent = 'Ответ создан и скопирован.';
+
             } catch (err) { console.error("Failed to handle offer:", err); }
         } else if (payload.type === 'answer') {
             try {
@@ -686,3 +704,4 @@
 </script>
 </body>
 </html>
+
