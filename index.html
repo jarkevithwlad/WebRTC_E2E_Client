@@ -2,682 +2,1306 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Продвинутый WebRTC чат с E2E шифрованием</title>
-    <!-- Библиотека для потокового хэширования -->
-    <script src="https://cdn.jsdelivr.net/npm/js-sha256@0.9.0/src/sha256.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Secure P2P Voice Chat with File Integrity</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
     <style>
-        :root {
-            --bg-color: #121212; --surface-color: #1e1e1e; --primary-text: #e0e0e0;
-            --secondary-text: #a0a0a0; --border-color: #333333; --accent-blue: #0d6efd;
-            --accent-green: #198754; --accent-red: #dc3545; --accent-orange: #fd7e14;
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            display: flex; flex-direction: column; align-items: center;
-            background-color: var(--bg-color); color: var(--primary-text); margin: 0; padding: 20px;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
         }
-        h1, h2 { color: var(--primary-text); border-bottom: 1px solid var(--border-color); padding-bottom: 10px; width: 100%; text-align: center; }
-        #app-container { display: flex; flex-direction: column; gap: 20px; align-items: center; max-width: 600px; width: 100%; }
-        .card { padding: 20px; border: 1px solid var(--border-color); border-radius: 8px; background-color: var(--surface-color); width: 100%; box-sizing: border-box; }
-        textarea {
-            width: 98%; min-height: 120px; margin: 10px auto; padding: 8px; font-size: 0.9em; display: block;
-            background-color: #2a2a2a; color: var(--primary-text); border: 1px solid var(--border-color); border-radius: 4px; resize: vertical; word-break: break-all;
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
         }
-        input[type="text"], input[type="file"] { width: 98%; padding: 8px; box-sizing: border-box; margin-top: 5px; background-color: #2a2a2a; color: var(--primary-text); border: 1px solid var(--border-color); border-radius: 4px;}
+
+        h1 {
+            color: #4ec9b0;
+            margin-bottom: 20px;
+            font-size: 24px;
+        }
+
+        .section {
+            background-color: #252526;
+            border: 1px solid #3e3e42;
+            border-radius: 4px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+
+        .section h2 {
+            color: #569cd6;
+            font-size: 16px;
+            margin-bottom: 15px;
+        }
+
         button {
-            font-size: 1em; padding: 10px 15px; border-radius: 5px; border: none; cursor: pointer;
-            background-color: var(--accent-blue); color: white; margin: 5px; transition: background-color 0.2s; width: 100%; box-sizing: border-box;
+            background-color: #0e639c;
+            color: #ffffff;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 2px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-right: 5px;
+            margin-bottom: 5px;
+            transition: background-color 0.2s;
         }
-        button:hover:not(:disabled) { opacity: 0.85; }
-        button:disabled { background-color: #555; cursor: not-allowed; }
-        #status-bar { margin: 20px 0; text-align: center; }
-        #status { font-size: 1.2em; font-weight: bold; color: var(--accent-orange); transition: color 0.3s; }
-        audio { margin-top: 10px; border: 1px solid var(--border-color); border-radius: 8px; width: 100%; }
-        #volume-controls div { display: flex; justify-content: space-between; align-items: center; margin: 10px 0; }
-        #in-call-info { text-align: center; font-size: 1.1em; color: var(--accent-green); }
 
-        /* --- Chat Styles --- */
-        #chat-area { display: flex; flex-direction: column; gap: 12px; height: 300px; overflow-y: auto; padding: 10px; background-color: #2a2a2a; border-radius: 4px; }
-        .message-bubble { display: flex; flex-direction: column; max-width: 80%; padding: 10px 15px; border-radius: 18px; position: relative; }
-        .message-content { word-wrap: break-word; }
-        .message-meta { font-size: 0.75em; color: var(--secondary-text); margin-top: 5px; display: flex; justify-content: space-between; align-items: center; }
-        .copy-btn { cursor: pointer; opacity: 0.5; transition: opacity 0.2s; margin-left: 10px; }
-        .copy-btn:hover { opacity: 1; }
-        .my-message { align-self: flex-end; background-color: var(--accent-blue); color: white; }
-        .peer-message { align-self: flex-start; background-color: #363636; }
+        button:hover {
+            background-color: #1177bb;
+        }
 
-        /* --- File Transfer Styles --- */
-        #file-transfer-controls { display: flex; gap: 10px; }
-        #progress-bar-container { width: 100%; background-color: #333; border-radius: 5px; margin-top: 10px; }
-        #progress-bar { width: 0%; height: 20px; background-color: var(--accent-green); border-radius: 5px; text-align: center; line-height: 20px; color: white; transition: width 0.1s; }
-        #file-transfer-info { font-size: 0.9em; margin-top: 5px; color: var(--secondary-text); }
-        #file-transfer-info a { color: var(--accent-blue); }
-        #call-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
-        .action-buttons button { flex-grow: 1; }
+        button:disabled {
+            background-color: #3e3e42;
+            cursor: not-allowed;
+        }
+
+        button.danger {
+            background-color: #c72e0f;
+        }
+
+        button.danger:hover {
+            background-color: #e03e0f;
+        }
+
+        button.success {
+            background-color: #0e7a0d;
+        }
+
+        button.success:hover {
+            background-color: #16a014;
+        }
+
+        textarea {
+            width: 100%;
+            background-color: #1e1e1e;
+            color: #d4d4d4;
+            border: 1px solid #3e3e42;
+            border-radius: 2px;
+            padding: 10px;
+            font-family: 'Consolas', monospace;
+            font-size: 12px;
+            resize: vertical;
+            margin-bottom: 10px;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            background-color: #3c3c3c;
+            color: #d4d4d4;
+            border: 1px solid #3e3e42;
+            border-radius: 2px;
+            padding: 8px;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+
+        input[type="file"] {
+            margin-bottom: 10px;
+        }
+
+        .status {
+            padding: 10px;
+            border-radius: 2px;
+            margin-bottom: 10px;
+            font-size: 13px;
+        }
+
+        .status.info {
+            background-color: #1a3a52;
+            border-left: 3px solid #569cd6;
+        }
+
+        .status.success {
+            background-color: #1a3a1a;
+            border-left: 3px solid #4ec9b0;
+        }
+
+        .status.error {
+            background-color: #3a1a1a;
+            border-left: 3px solid #f48771;
+        }
+
+        .status.warning {
+            background-color: #3a3a1a;
+            border-left: 3px solid #dcdcaa;
+        }
+
+        .chat-messages {
+            height: 300px;
+            overflow-y: auto;
+            background-color: #1e1e1e;
+            border: 1px solid #3e3e42;
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 2px;
+        }
+
+        .message {
+            margin-bottom: 10px;
+            padding: 8px;
+            border-radius: 2px;
+        }
+
+        .message.sent {
+            background-color: #1a3a52;
+            text-align: right;
+        }
+
+        .message.received {
+            background-color: #2d2d30;
+        }
+
+        .message .time {
+            font-size: 11px;
+            color: #858585;
+            margin-bottom: 3px;
+        }
+
+        .file-transfer {
+            padding: 10px;
+            background-color: #2d2d30;
+            border: 1px solid #3e3e42;
+            border-radius: 2px;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+
+        .file-transfer.pending {
+            border-left: 3px solid #dcdcaa;
+        }
+
+        .file-transfer.success {
+            border-left: 3px solid #4ec9b0;
+        }
+
+        .file-transfer.error {
+            border-left: 3px solid #f48771;
+        }
+
+        .file-hash {
+            font-family: 'Consolas', monospace;
+            font-size: 11px;
+            color: #858585;
+            margin-top: 5px;
+            word-break: break-all;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+
+        @media (max-width: 768px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .copy-btn {
+            background-color: #0e7a0d;
+        }
+
+        .copy-btn:hover {
+            background-color: #16a014;
+        }
+
+        .debug-console {
+            background-color: #1e1e1e;
+            border: 1px solid #3e3e42;
+            padding: 10px;
+            margin-top: 10px;
+            font-size: 11px;
+            font-family: 'Consolas', monospace;
+            max-height: 100px;
+            overflow-y: auto;
+        }
+
+        .debug-log {
+            color: #858585;
+            margin-bottom: 2px;
+        }
+
+        .security-info {
+            background-color: #1a3a52;
+            padding: 10px;
+            border-radius: 2px;
+            font-size: 12px;
+            margin-top: 10px;
+        }
+
+        .security-info p {
+            margin-bottom: 5px;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 4px;
+            background-color: #3e3e42;
+            border-radius: 2px;
+            overflow: hidden;
+            margin-top: 5px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background-color: #4ec9b0;
+            width: 0%;
+            transition: width 0.3s;
+        }
     </style>
 </head>
 <body>
-    <h1>Продвинутый WebRTC чат с E2E шифрованием</h1>
-    <div id="status-bar"><div id="status">Статус: Готов к работе</div></div>
+    <div class="container">
+        <h1>🔐 Secure P2P Voice Chat (End-to-End Encrypted)</h1>
 
-    <div id="app-container">
-        <div class="card">
-            <h2>Ваш никнейм</h2>
-            <input type="text" id="nicknameInput" placeholder="Введите ваш никнейм...">
+        <div class="grid">
+            <div>
+                <div class="section">
+                    <h2>1. Подключение</h2>
+                    <button id="startBtn" class="success">Начать соединение</button>
+                    <button id="stopBtn" class="danger" disabled>Остановить</button>
+                    <div id="connectionStatus" class="status info" style="margin-top: 10px;">
+                        Готов к подключению
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h2>2. Обмен данными</h2>
+                    <div style="margin-bottom: 10px;">
+                        <strong>Ваше предложение (отправьте собеседнику):</strong>
+                        <textarea id="offerText" rows="4" readonly></textarea>
+                        <button id="copyOfferBtn" class="copy-btn" disabled>📋 Копировать предложение</button>
+                    </div>
+                    <div>
+                        <strong>Ответ собеседника (вставьте сюда):</strong>
+                        <textarea id="answerText" rows="4" placeholder="Вставьте ответ от собеседника..."></textarea>
+                        <button id="connectBtn" disabled>🔗 Установить соединение</button>
+                    </div>
+                </div>
+            </div>
+
+            <div>
+                <div class="section">
+                    <h2>🔒 Шифрование</h2>
+                    <div id="encryptionStatus" class="status info">
+                        Шифрование не активировано
+                    </div>
+                    <div class="security-info">
+                        <p>✓ RSA-OAEP 2048 бит для обмена ключами</p>
+                        <p>✓ AES-GCM 256 бит для всех данных</p>
+                        <p>✓ MD5 проверка целостности файлов</p>
+                        <p>✓ Шумоподавление: Включено</p>
+                        <p>✓ Качество: 510 кбит/с (Opus)</p>
+                        <p>⚠️ Все данные зашифрованы сквозным шифрованием</p>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h2>🎙️ Аудио контроль</h2>
+                    <button id="muteBtn" disabled>🎤 Выключить микрофон</button>
+                    <button id="volumeBtn" disabled>🔊 Громкость: 100%</button>
+                    <audio id="remoteAudio" autoplay></audio>
+                </div>
+            </div>
         </div>
 
-        <div id="connection-card" class="card">
-            <h2>Подключение</h2>
-            <button id="createRequestBtn">Создать запрос на звонок</button>
-            <textarea id="signalingCodeText" placeholder="Вставьте сюда код от собеседника..."></textarea>
-        </div>
-
-        <div id="in-call-controls" class="card" hidden>
-            <h2 id="in-call-info">Идет звонок...</h2>
-            <div id="volume-controls">
-                <div>
-                    <label for="sendVolume">Громкость отправки:</label>
-                    <input type="range" id="sendVolume" min="0" max="1000" value="100">
-                    <span id="sendVolumeValue">100%</span>
-                </div>
-                <div>
-                    <label for="receiveVolume">Громкость приема:</label>
-                    <input type="range" id="receiveVolume" min="0" max="1000" value="100">
-                    <span id="receiveVolumeValue">100%</span>
-                </div>
-            </div>
-            <audio id="remoteAudio" autoplay></audio>
-
-            <div id="chat-container">
-                <h2>Чат</h2>
-                <div id="chat-area"></div>
-                <input type="text" id="chatInput" placeholder="Введите сообщение...">
-                <button id="sendMsgBtn">Отправить</button>
+        <div class="grid">
+            <div class="section">
+                <h2>💬 Зашифрованный чат</h2>
+                <div id="chatMessages" class="chat-messages"></div>
+                <input type="text" id="messageInput" placeholder="Введите сообщение (зашифруется автоматически)..." disabled>
+                <button id="sendMessageBtn" disabled>📤 Отправить</button>
+                <div class="debug-console" id="debugConsole"></div>
             </div>
 
-            <div id="file-transfer-container">
-                <h2>Передача файлов</h2>
-                <input type="file" id="fileInput">
-                <div id="file-transfer-controls">
-                    <button id="sendFileBtn">Отправить файл</button>
-                    <button id="cancelFileTransferBtn" style="background-color: var(--accent-orange);" hidden>Отмена</button>
-                </div>
-                <div id="progress-bar-container">
-                    <div id="progress-bar">0%</div>
-                </div>
-                <div id="file-transfer-info"></div>
-            </div>
-            
-            <div id="call-actions">
-                <button id="toggleMuteBtn" style="background-color: var(--accent-green);">Выключить микрофон</button>
-                <button id="disconnectBtn" style="background-color: var(--accent-red);">Завершить звонок</button>
+            <div class="section">
+                <h2>📁 Передача файлов (с проверкой целостности)</h2>
+                <input type="file" id="fileInput" disabled>
+                <button id="sendFileBtn" disabled>📤 Отправить файл</button>
+                <div id="fileTransfers"></div>
             </div>
         </div>
     </div>
 
-<script>
-    // --- DOM Elements & Global State ---
-    const nicknameInput = document.getElementById('nicknameInput'), statusEl = document.getElementById('status'),
-          createRequestBtn = document.getElementById('createRequestBtn'), signalingCodeText = document.getElementById('signalingCodeText'),
-          inCallControlsEl = document.getElementById('in-call-controls'), connectionCardEl = document.getElementById('connection-card'),
-          inCallInfoEl = document.getElementById('in-call-info'), remoteAudio = document.getElementById('remoteAudio'),
-          disconnectBtn = document.getElementById('disconnectBtn'), sendVolumeSlider = document.getElementById('sendVolume'),
-          receiveVolumeSlider = document.getElementById('receiveVolume'), sendVolumeValue = document.getElementById('sendVolumeValue'),
-          receiveVolumeValue = document.getElementById('receiveVolumeValue'), chatArea = document.getElementById('chat-area'),
-          chatInput = document.getElementById('chatInput'), sendMsgBtn = document.getElementById('sendMsgBtn'),
-          fileInput = document.getElementById('fileInput'), sendFileBtn = document.getElementById('sendFileBtn'),
-          cancelFileTransferBtn = document.getElementById('cancelFileTransferBtn'),
-          progressBar = document.getElementById('progress-bar'), fileTransferInfo = document.getElementById('file-transfer-info'),
-          toggleMuteBtn = document.getElementById('toggleMuteBtn');
+    <script>
+        // ===== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ =====
+        let peerConnection = null;
+        let dataChannel = null;
+        let localStream = null;
+        let publicKey = null;
+        let privateKey = null;
+        let remotePublicKey = null;
+        let symmetricKey = null;
+        let isMuted = false;
+        let volumeLevel = 1.0;
+        let isInitiator = false;
+        let keyExchangeComplete = false;
 
-    // Используем только проверенный STUN-сервер, как и было изначально.
-    const configuration = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
-    let peerConnection, localStream, dataChannel, connectionTimeout;
-    let audioContext, localGainNode, remoteStreamSource, remoteGainNode;
-    let incomingFileInfo = {}, transferStartTime, fileWriter, receivedFileHandle;
-    let receivedSize = 0, receiveBuffer = [];
-    let isMuted = false;
-    let isTransferCancelled = false;
-    let currentDownloadUrl = null;
-    const CHUNK_SIZE = 64 * 1024;
-    
-    // --- E2EE Crypto State ---
-    let myIdentityKeys;
-    let peerIdentityKey;
-    let cryptoReady = false;
-    const ECDH_PARAMS = { name: 'ECDH', namedCurve: 'P-256' };
-    const AES_PARAMS = { name: 'AES-GCM', length: 256 };
-    const HKDF_PARAMS = { name: 'HKDF', hash: 'SHA-256' };
-    const EPHEMERAL_KEY_LENGTH = 65; // Uncompressed P-256 public key
-    const IV_LENGTH = 12; // AES-GCM recommended nonce length
+        // Элементы DOM
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const offerText = document.getElementById('offerText');
+        const answerText = document.getElementById('answerText');
+        const copyOfferBtn = document.getElementById('copyOfferBtn');
+        const connectBtn = document.getElementById('connectBtn');
+        const connectionStatus = document.getElementById('connectionStatus');
+        const encryptionStatus = document.getElementById('encryptionStatus');
+        const remoteAudio = document.getElementById('remoteAudio');
+        const muteBtn = document.getElementById('muteBtn');
+        const volumeBtn = document.getElementById('volumeBtn');
+        const chatMessages = document.getElementById('chatMessages');
+        const messageInput = document.getElementById('messageInput');
+        const sendMessageBtn = document.getElementById('sendMessageBtn');
+        const fileInput = document.getElementById('fileInput');
+        const sendFileBtn = document.getElementById('sendFileBtn');
+        const fileTransfers = document.getElementById('fileTransfers');
+        const debugConsole = document.getElementById('debugConsole');
 
-    // --- Initialization ---
-    window.addEventListener('load', () => {
-        nicknameInput.value = localStorage.getItem('nickname') || '';
-        sendVolumeSlider.value = localStorage.getItem('sendVolume') || '100';
-        receiveVolumeSlider.value = localStorage.getItem('receiveVolume') || '100';
-        handleSendVolumeChange(); handleReceiveVolumeChange();
-    });
-    window.addEventListener('beforeunload', revokeDownloadLink);
-    nicknameInput.addEventListener('change', () => localStorage.setItem('nickname', nicknameInput.value));
+        // Хранилище для собираемых файлов
+        let fileReceivers = {};
 
-    // --- Core WebRTC Logic ---
-    async function initializePeerConnection() {
-        if (peerConnection) peerConnection.close();
-        peerConnection = new RTCPeerConnection(configuration);
-
-        // ИЗМЕНЕНИЕ №1: Вешаем все обработчики СРАЗУ при инициализации,
-        // до того, как будут созданы offer или answer.
-        peerConnection.ontrack = event => {
-            remoteAudio.srcObject = event.streams[0];
-            setupRemoteAudioProcessing(event.streams[0]);
-        };
-        peerConnection.ondatachannel = event => {
-            dataChannel = event.channel;
-            setupDataChannelHandlers();
-        };
-        peerConnection.onconnectionstatechange = () => {
-            const state = peerConnection.connectionState;
-            statusEl.textContent = `Статус: ${state}`;
-            if (state === 'connected') {
-                clearTimeout(connectionTimeout);
-                statusEl.style.color = 'var(--accent-green)';
-                connectionCardEl.hidden = true; inCallControlsEl.hidden = false;
-            } else if (['disconnected', 'failed', 'closed'].includes(state)) {
-                forceDisconnect();
+        // ===== ЛОГИРОВАНИЕ =====
+        function log(message) {
+            console.log(message);
+            const logEntry = document.createElement('div');
+            logEntry.className = 'debug-log';
+            logEntry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            debugConsole.appendChild(logEntry);
+            debugConsole.scrollTop = debugConsole.scrollHeight;
+            if (debugConsole.children.length > 30) {
+                debugConsole.removeChild(debugConsole.firstChild);
             }
-        };
-        
-        // Запрашиваем доступ к микрофону
-        await setupLocalMedia();
-    }
+        }
 
-    createRequestBtn.onclick = async () => {
-        if (!nicknameInput.value) return alert('Пожалуйста, введите ваш никнейм.');
-        try {
-            await initializePeerConnection();
-            dataChannel = peerConnection.createDataChannel("data", { ordered: true });
-            setupDataChannelHandlers();
+        // ===== MD5 ХЕШИРОВАНИЕ =====
+        function calculateMD5(data) {
+            return CryptoJS.MD5(data).toString();
+        }
 
-            // ИЗМЕНЕНИЕ №2: Назначаем обработчик onicecandidate ДО вызова setLocalDescription.
-            // Теперь он гарантированно сработает.
-            peerConnection.onicecandidate = e => {
-                // Ждем, пока сбор кандидатов не завершится (e.candidate будет null)
-                if (e.candidate) return;
-                
-                // Как только сбор завершен, peerConnection.localDescription содержит ВСЕ кандидаты.
-                // Копируем готовый код приглашения.
-                navigator.clipboard.writeText(btoa(JSON.stringify({ type: 'offer', sdp: peerConnection.localDescription })));
-                statusEl.textContent = 'Код приглашения скопирован. Отправьте его.';
-            };
+        function calculateMD5FromArrayBuffer(buffer) {
+            const wordArray = CryptoJS.lib.WordArray.create(buffer);
+            return CryptoJS.MD5(wordArray).toString();
+        }
+
+        // ===== РАБОТА С БУФЕРОМ =====
+        function arrayBufferToBase64(buffer) {
+            const bytes = new Uint8Array(buffer);
+            const chunkSize = 8192;
+            let binary = '';
             
-            const offer = await peerConnection.createOffer();
-            await peerConnection.setLocalDescription(offer); // Этот вызов запускает сбор кандидатов
+            for (let i = 0; i < bytes.length; i += chunkSize) {
+                const chunk = bytes.subarray(i, i + chunkSize);
+                binary += String.fromCharCode.apply(null, chunk);
+            }
+            
+            return btoa(binary);
+        }
 
-        } catch (err) { console.error("Failed to create offer:", err); }
-    };
+        function base64ToArrayBuffer(base64) {
+            const binary = atob(base64);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+                bytes[i] = binary.charCodeAt(i);
+            }
+            return bytes.buffer;
+        }
 
-    signalingCodeText.addEventListener('input', async () => {
-        const code = signalingCodeText.value;
-        if (code.length < 50) return;
-        let payload;
-        try { payload = JSON.parse(atob(code)); } catch { return; }
-        
-        if (payload.type === 'offer') {
+        // ===== КРИПТОГРАФИЯ =====
+        const rtcConfig = {
+            iceServers: []
+        };
+
+        async function generateKeyPair() {
+            const keyPair = await window.crypto.subtle.generateKey(
+                {
+                    name: "RSA-OAEP",
+                    modulusLength: 2048,
+                    publicExponent: new Uint8Array([1, 0, 1]),
+                    hash: "SHA-256"
+                },
+                true,
+                ["encrypt", "decrypt"]
+            );
+            return keyPair;
+        }
+
+        async function exportPublicKey(key) {
+            const exported = await window.crypto.subtle.exportKey("spki", key);
+            return btoa(String.fromCharCode(...new Uint8Array(exported)));
+        }
+
+        async function importPublicKey(keyData) {
+            const binaryKey = Uint8Array.from(atob(keyData), c => c.charCodeAt(0));
+            return await window.crypto.subtle.importKey(
+                "spki",
+                binaryKey,
+                {
+                    name: "RSA-OAEP",
+                    hash: "SHA-256"
+                },
+                true,
+                ["encrypt"]
+            );
+        }
+
+        async function generateSymmetricKey() {
+            return await window.crypto.subtle.generateKey(
+                {
+                    name: "AES-GCM",
+                    length: 256
+                },
+                true,
+                ["encrypt", "decrypt"]
+            );
+        }
+
+        async function encryptData(data, key) {
+            const iv = window.crypto.getRandomValues(new Uint8Array(12));
+            let encoded;
+            
+            if (typeof data === 'string') {
+                encoded = new TextEncoder().encode(data);
+            } else {
+                encoded = data;
+            }
+            
+            const encrypted = await window.crypto.subtle.encrypt(
+                {
+                    name: "AES-GCM",
+                    iv: iv
+                },
+                key,
+                encoded
+            );
+            
+            return {
+                iv: btoa(String.fromCharCode(...iv)),
+                data: btoa(String.fromCharCode(...new Uint8Array(encrypted)))
+            };
+        }
+
+        async function decryptData(encryptedObj, key) {
             try {
-                await initializePeerConnection();
+                const iv = Uint8Array.from(atob(encryptedObj.iv), c => c.charCodeAt(0));
+                const data = Uint8Array.from(atob(encryptedObj.data), c => c.charCodeAt(0));
                 
-                // ИЗМЕНЕНИЕ №3: Точно такая же логика для отвечающего.
-                // Назначаем обработчик ЗАРАНЕЕ.
-                peerConnection.onicecandidate = e => {
-                    if (e.candidate) return;
-                    navigator.clipboard.writeText(btoa(JSON.stringify({ type: 'answer', sdp: peerConnection.localDescription })));
-                    statusEl.textContent = 'Ответ создан и скопирован.';
-                };
+                const decrypted = await window.crypto.subtle.decrypt(
+                    {
+                        name: "AES-GCM",
+                        iv: iv
+                    },
+                    key,
+                    data
+                );
+                return new TextDecoder().decode(decrypted);
+            } catch (error) {
+                log('❌ Ошибка расшифровки: ' + error.message);
+                throw error;
+            }
+        }
 
-                await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.sdp));
-                const answer = await peerConnection.createAnswer();
-                await peerConnection.setLocalDescription(answer); // Запускаем сбор кандидатов
+        async function encryptSymmetricKey(symmetricKey, publicKey) {
+            const exported = await window.crypto.subtle.exportKey("raw", symmetricKey);
+            const encrypted = await window.crypto.subtle.encrypt(
+                {
+                    name: "RSA-OAEP"
+                },
+                publicKey,
+                exported
+            );
+            return btoa(String.fromCharCode(...new Uint8Array(encrypted)));
+        }
 
-            } catch (err) { console.error("Failed to handle offer:", err); }
-        } else if (payload.type === 'answer') {
+        async function decryptSymmetricKey(encryptedKey, privateKey) {
+            const encrypted = Uint8Array.from(atob(encryptedKey), c => c.charCodeAt(0));
+            const decrypted = await window.crypto.subtle.decrypt(
+                {
+                    name: "RSA-OAEP"
+                },
+                privateKey,
+                encrypted
+            );
+            return await window.crypto.subtle.importKey(
+                "raw",
+                decrypted,
+                {
+                    name: "AES-GCM",
+                    length: 256
+                },
+                true,
+                ["encrypt", "decrypt"]
+            );
+        }
+
+        // ===== ОБНОВЛЕНИЕ СТАТУСА =====
+        function updateStatus(message, type = 'info') {
+            connectionStatus.textContent = message;
+            connectionStatus.className = `status ${type}`;
+            log(message);
+        }
+
+        function updateEncryptionStatus(message, type = 'info') {
+            encryptionStatus.textContent = message;
+            encryptionStatus.className = `status ${type}`;
+        }
+
+        // ===== DATA CHANNEL УПРАВЛЕНИЕ =====
+        function setupDataChannel(channel) {
+            channel.binaryType = 'arraybuffer';
+            
+            channel.onopen = async () => {
+                log('✅ Data channel открыт!');
+                updateStatus('Канал данных открыт', 'success');
+                
+                if (keyExchangeComplete) {
+                    enableChatAndFiles();
+                    log('💬 Чат и файлы уже доступны');
+                } else if (isInitiator) {
+                    log('🔐 Отправляю симметричный ключ...');
+                    await sendSymmetricKey(channel);
+                } else {
+                    log('⏳ Жду получения симметричного ключа...');
+                }
+            };
+
+            channel.onmessage = async (event) => {
+                try {
+                    const message = JSON.parse(event.data);
+                    
+                    if (message.type === 'key') {
+                        log('🔑 Получаю симметричный ключ...');
+                        symmetricKey = await decryptSymmetricKey(message.key, privateKey);
+                        keyExchangeComplete = true;
+                        updateEncryptionStatus('🔒 Шифрование активировано (RSA-OAEP + AES-GCM 256)', 'success');
+                        log('✅ Симметричный ключ расшифрован и установлен');
+                        enableChatAndFiles();
+                        
+                        if (!isInitiator) {
+                            log('📤 Отправляю подтверждение ключа...');
+                            await sendSymmetricKey(channel);
+                        }
+                    } else if (message.type === 'file_info') {
+                        const fileInfo = JSON.parse(await decryptData(message.data, symmetricKey));
+                        log(`📋 Начало получения: ${fileInfo.name} (${fileInfo.totalChunks} chunks)`);
+                        if (!fileReceivers[fileInfo.fileId]) {
+                            fileReceivers[fileInfo.fileId] = {
+                                chunks: new Array(fileInfo.totalChunks),
+                                received: 0,
+                                name: fileInfo.name,
+                                size: fileInfo.size,
+                                startTime: Date.now(),
+                                expectedMD5: fileInfo.md5,
+                                mimeType: fileInfo.mimeType
+                            };
+                            addFileTransferUI(fileInfo.fileId, fileInfo.name, fileInfo.size, 'pending');
+                        }
+                    } else if (message.type === 'file_chunk' && keyExchangeComplete) {
+                        await receiveFileChunk(message);
+                    } else if (message.type === 'file_complete') {
+                        const fileComplete = JSON.parse(await decryptData(message.data, symmetricKey));
+                        if (fileReceivers[fileComplete.fileId]) {
+                            await assembleAndVerifyFile(fileComplete.fileId);
+                        }
+                    } else if (message.type === 'chat' && keyExchangeComplete) {
+                        const decrypted = await decryptData(message.data, symmetricKey);
+                        displayMessage(decrypted, 'received');
+                    }
+                } catch (error) {
+                    log('❌ Ошибка обработки сообщения: ' + error.message);
+                    console.error(error);
+                }
+            };
+
+            channel.onerror = (error) => {
+                log('❌ Data channel ошибка: ' + error.message);
+                console.error(error);
+            };
+
+            channel.onclose = () => {
+                log('⚠️ Data channel закрыт');
+                updateStatus('Канал данных закрыт', 'error');
+                messageInput.disabled = true;
+                sendMessageBtn.disabled = true;
+                fileInput.disabled = true;
+                sendFileBtn.disabled = true;
+            };
+        }
+
+        async function sendSymmetricKey(channel) {
             try {
-                // Устанавливаем remote description только после того, как он был создан
-                if (!peerConnection) {
-                    statusEl.textContent = 'Ошибка: сначала создайте запрос на звонок.';
+                if (!symmetricKey) {
+                    log('🔑 Генерирую симметричный ключ AES-GCM...');
+                    symmetricKey = await generateSymmetricKey();
+                }
+                
+                if (!remotePublicKey) {
+                    log('❌ Нет публичного ключа удаленного пользователя');
                     return;
                 }
-                await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.sdp));
-                statusEl.textContent = 'Подключение...';
-                connectionTimeout = setTimeout(() => { statusEl.textContent = 'Не удалось подключиться (тайм-аут).'; forceDisconnect(); }, 15000);
-            } catch (err) { console.error("Failed to set remote description:", err); }
-        }
-    });
-    
-    // --- Data Channel Handlers ---
-    function setupDataChannelHandlers() {
-        dataChannel.onopen = async () => {
-            statusEl.textContent = 'Канал открыт. Инициализация шифрования...';
-            myIdentityKeys = await crypto.subtle.generateKey(ECDH_PARAMS, true, ['deriveKey', 'deriveBits']);
-            const exportedPubKey = await crypto.subtle.exportKey('raw', myIdentityKeys.publicKey);
-            dataChannel.send(JSON.stringify({
-                type: 'crypto-handshake',
-                key: Array.from(new Uint8Array(exportedPubKey))
-            }));
-        };
-        dataChannel.binaryType = 'arraybuffer';
-        dataChannel.onmessage = async (event) => {
-            if (typeof event.data === 'string') {
-                const msg = JSON.parse(event.data);
-                if (msg.type === 'crypto-handshake') {
-                    const pubKeyBuffer = new Uint8Array(msg.key);
-                    peerIdentityKey = await crypto.subtle.importKey('raw', pubKeyBuffer, ECDH_PARAMS, true, []);
-                    console.log("Peer public key received and imported.");
-                    if (myIdentityKeys && peerIdentityKey) {
-                        cryptoReady = true;
-                        statusEl.textContent = 'Шифрование установлено. Канал защищен.';
-                        await encryptAndSend({ type: 'nickname', value: nicknameInput.value || 'Anonymous' });
-                    }
-                }
-            } else {
-                await decryptAndProcess(event.data);
-            }
-        };
-    }
-
-    async function handleTextMessage(msg) {
-        switch (msg.type) {
-            case 'nickname': inCallInfoEl.textContent = `В звонке с: ${msg.value}`; break;
-            case 'disconnect': forceDisconnect(); break;
-            case 'chat': appendMessage(msg.value, 'peer-message'); break;
-            case 'file-start':
-                revokeDownloadLink();
-                isTransferCancelled = false;
-                incomingFileInfo = { name: msg.name, size: msg.size, checksum: msg.checksum };
-                receivedSize = 0;
-                transferStartTime = new Date().getTime();
-                updateProgress(0);
-                promptToAcceptFile(incomingFileInfo);
-                break;
-            case 'file-reject':
-                fileTransferInfo.textContent = 'Получатель отклонил файл.';
-                resetFileTransferUI(true);
-                break;
-            case 'file-accept':
-                sendFileChunks();
-                break;
-            case 'file-cancel':
-                isTransferCancelled = true;
-                if (fileWriter) { await fileWriter.abort(); fileWriter = null; receivedFileHandle = null; }
-                receiveBuffer = [];
-                resetFileTransferUI();
-                fileTransferInfo.textContent = 'Передача файла отменена собеседником.';
-                break;
-        }
-    }
-
-    async function handleBinaryMessage(data) {
-        if (isTransferCancelled) return;
-        receivedSize += data.byteLength;
-        const progress = receivedSize / incomingFileInfo.size;
-        updateProgress(progress);
-        const elapsedTime = (new Date().getTime() - transferStartTime) / 1000;
-        const speed = receivedSize / elapsedTime;
-        fileTransferInfo.textContent = `Получение: ${formatBytes(receivedSize)} / ${formatBytes(incomingFileInfo.size)} (${formatSpeed(speed)})`;
-        if (fileWriter) {
-            await fileWriter.write(data);
-        } else {
-            receiveBuffer.push(data);
-        }
-
-        if (receivedSize === incomingFileInfo.size) {
-            let finalFile;
-            if (fileWriter) {
-                await fileWriter.close();
-                finalFile = await receivedFileHandle.getFile();
-                fileWriter = null; receivedFileHandle = null;
-            } else {
-                finalFile = new Blob(receiveBuffer);
-                receiveBuffer = [];
-            }
-            
-            fileTransferInfo.textContent = `Проверка целостности файла: 0%`;
-            await new Promise(resolve => setTimeout(resolve, 50));
-            const checksum = await calculateChecksum(finalFile, (p) => { fileTransferInfo.textContent = `Проверка целостности файла: ${p.toFixed(0)}%`; });
-            
-            if (checksum === incomingFileInfo.checksum) {
-                const link = document.createElement('a');
-                currentDownloadUrl = URL.createObjectURL(finalFile);
-                link.href = currentDownloadUrl;
-                link.download = incomingFileInfo.name;
-                link.textContent = `Скачать ${incomingFileInfo.name}`;
-                link.onclick = () => setTimeout(revokeDownloadLink, 1000);
-                fileTransferInfo.innerHTML = `Файл ${incomingFileInfo.name} получен и проверен. `;
-                fileTransferInfo.appendChild(link);
-            } else {
-                fileTransferInfo.textContent = `ОШИБКА: Контрольная сумма файла не совпадает! Файл может быть поврежден.`;
+                
+                const encryptedKey = await encryptSymmetricKey(symmetricKey, remotePublicKey);
+                channel.send(JSON.stringify({
+                    type: 'key',
+                    key: encryptedKey
+                }));
+                log('✅ Симметричный ключ зашифрован RSA-OAEP и отправлен');
+                keyExchangeComplete = true;
+                updateEncryptionStatus('🔒 Шифрование активировано (RSA-OAEP + AES-GCM 256)', 'success');
+            } catch (error) {
+                log('❌ Ошибка отправки ключа: ' + error.message);
             }
         }
-    }
-    
-    // --- E2EE Crypto Functions ---
-    async function encryptAndSend(payload, isBinary = false) {
-        if (!cryptoReady) { console.error("Crypto not ready, cannot send message."); return; }
-        const ephemeralKeys = await crypto.subtle.generateKey(ECDH_PARAMS, true, ['deriveBits']);
-        const sharedSecret = await crypto.subtle.deriveBits(
-            { name: 'ECDH', public: peerIdentityKey },
-            ephemeralKeys.privateKey,
-            256
-        );
-        const hkdfKey = await crypto.subtle.importKey('raw', sharedSecret, HKDF_PARAMS, false, ['deriveKey']);
-        const aesKey = await crypto.subtle.deriveKey(
-            { ...HKDF_PARAMS, salt: new Uint8Array(16), info: new Uint8Array() },
-            hkdfKey,
-            AES_PARAMS,
-            true,
-            ['encrypt']
-        );
-        const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
-        let plaintext;
-        if (isBinary) {
-            plaintext = payload;
-        } else {
-            plaintext = new TextEncoder().encode(JSON.stringify(payload));
-        }
-        const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, plaintext);
-        const exportedEphemeralPub = await crypto.subtle.exportKey('raw', ephemeralKeys.publicKey);
-        const finalPacket = new Uint8Array(EPHEMERAL_KEY_LENGTH + IV_LENGTH + ciphertext.byteLength);
-        finalPacket.set(new Uint8Array(exportedEphemeralPub), 0);
-        finalPacket.set(iv, EPHEMERAL_KEY_LENGTH);
-        finalPacket.set(new Uint8Array(ciphertext), EPHEMERAL_KEY_LENGTH + IV_LENGTH);
-        dataChannel.send(finalPacket.buffer);
-    }
 
-    async function decryptAndProcess(packet) {
-        try {
-            const receivedEphemeralPubRaw = packet.slice(0, EPHEMERAL_KEY_LENGTH);
-            const iv = packet.slice(EPHEMERAL_KEY_LENGTH, EPHEMERAL_KEY_LENGTH + IV_LENGTH);
-            const ciphertext = packet.slice(EPHEMERAL_KEY_LENGTH + IV_LENGTH);
-            const receivedEphemeralPub = await crypto.subtle.importKey('raw', receivedEphemeralPubRaw, ECDH_PARAMS, true, []);
-            const sharedSecret = await crypto.subtle.deriveBits(
-                { name: 'ECDH', public: receivedEphemeralPub },
-                myIdentityKeys.privateKey,
-                256
-            );
-            const hkdfKey = await crypto.subtle.importKey('raw', sharedSecret, HKDF_PARAMS, false, ['deriveKey']);
-            const aesKey = await crypto.subtle.deriveKey(
-                { ...HKDF_PARAMS, salt: new Uint8Array(16), info: new Uint8Array() },
-                hkdfKey,
-                AES_PARAMS,
-                true,
-                ['decrypt']
-            );
-            const decryptedPlaintextBuffer = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, ciphertext);
+        function enableChatAndFiles() {
+            messageInput.disabled = false;
+            sendMessageBtn.disabled = false;
+            fileInput.disabled = false;
+            sendFileBtn.disabled = false;
+            log('✅ Чат и передача файлов доступны');
+        }
+
+        // ===== СОЕДИНЕНИЕ WEBRTC =====
+        async function startConnection() {
             try {
-                const payload = JSON.parse(new TextDecoder().decode(decryptedPlaintextBuffer));
-                handleTextMessage(payload);
-            } catch (e) {
-                handleBinaryMessage(decryptedPlaintextBuffer);
+                isInitiator = true;
+                updateStatus('🔐 Генерация RSA ключей...', 'info');
+                log('🚀 Стартую как инициатор соединения...');
+                
+                const keyPair = await generateKeyPair();
+                publicKey = keyPair.publicKey;
+                privateKey = keyPair.privateKey;
+                log('✅ RSA-OAEP 2048 ключи сгенерированы');
+                
+                updateEncryptionStatus('🔑 Ключи готовы (ожидание подключения)', 'info');
+
+                updateStatus('🎤 Запрос доступа к микрофону...', 'info');
+                localStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true,
+                        sampleRate: 48000,
+                        channelCount: 2
+                    },
+                    video: false
+                });
+                log('✅ Микрофон активирован (шумоподавление включено)');
+
+                peerConnection = new RTCPeerConnection(rtcConfig);
+
+                localStream.getTracks().forEach(track => {
+                    peerConnection.addTrack(track, localStream);
+                });
+
+                const transceivers = peerConnection.getTransceivers();
+                transceivers.forEach(transceiver => {
+                    if (transceiver.sender && transceiver.sender.track && transceiver.sender.track.kind === 'audio') {
+                        const parameters = transceiver.sender.getParameters();
+                        if (!parameters.encodings) {
+                            parameters.encodings = [{}];
+                        }
+                        parameters.encodings[0].maxBitrate = 510000;
+                        transceiver.sender.setParameters(parameters);
+                    }
+                });
+                log('🔊 Opus кодек настроен на 510 кбит/с');
+
+                dataChannel = peerConnection.createDataChannel('secureChannel', {
+                    ordered: true
+                });
+                setupDataChannel(dataChannel);
+
+                let iceCandidates = [];
+                peerConnection.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        iceCandidates.push(event.candidate);
+                    }
+                };
+
+                peerConnection.onicegatheringstatechange = async () => {
+                    if (peerConnection.iceGatheringState === 'complete') {
+                        log('✅ Все ICE кандидаты собраны (' + iceCandidates.length + ')');
+                        const publicKeyStr = await exportPublicKey(publicKey);
+                        const offer = {
+                            sdp: peerConnection.localDescription,
+                            publicKey: publicKeyStr,
+                            candidates: iceCandidates
+                        };
+                        
+                        const offerJson = JSON.stringify(offer);
+                        const offerBase64 = btoa(unescape(encodeURIComponent(offerJson)));
+                        offerText.value = offerBase64;
+                        copyOfferBtn.disabled = false;
+                        connectBtn.disabled = false;
+                        updateStatus('✅ Предложение создано. Отправьте его собеседнику!', 'success');
+                    }
+                };
+
+                peerConnection.ontrack = (event) => {
+                    log('🔊 Входящий аудиопоток получен');
+                    remoteAudio.srcObject = event.streams[0];
+                    updateStatus('🎙️ Аудиопоток получен', 'success');
+                };
+
+                peerConnection.ondatachannel = (event) => {
+                    log('📡 Входящий data channel получен');
+                    dataChannel = event.channel;
+                    setupDataChannel(dataChannel);
+                };
+
+                const offer = await peerConnection.createOffer();
+                await peerConnection.setLocalDescription(offer);
+                log('📝 Offer создан и установлен как local description');
+
+                updateStatus('⏳ Сбор ICE кандидатов...', 'info');
+
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                muteBtn.disabled = false;
+                volumeBtn.disabled = false;
+
+            } catch (error) {
+                updateStatus('❌ Ошибка: ' + error.message, 'error');
+                log('❌ Ошибка начала соединения: ' + error.message);
+                console.error(error);
             }
-        } catch (error) {
-            console.error("Decryption failed!", error);
-            statusEl.textContent = "Ошибка расшифровки!";
         }
-    }
 
-    // --- Media and Audio ---
-    async function setupLocalMedia() {
-        try {
-            localStream = await navigator.mediaDevices.getUserMedia({ audio: { noiseSuppression: true, echoCancellation: true } });
-            if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            const source = audioContext.createMediaStreamSource(localStream);
-            localGainNode = audioContext.createGain();
-            const destination = audioContext.createMediaStreamDestination();
-            source.connect(localGainNode).connect(destination);
-            handleSendVolumeChange();
-            // Добавляем трек в peerConnection
-            localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
-        } catch (e) {
-            statusEl.textContent = e.name === "NotAllowedError" ? 'Ошибка: Вы не разрешили доступ к микрофону.' : 'Ошибка: Не удалось инициализировать микрофон.';
-            console.error("Error in setupLocalMedia:", e);
-            throw e;
+        async function connectWithAnswer() {
+            try {
+                const answerBase64 = answerText.value.trim();
+                if (!answerBase64) {
+                    alert('Пожалуйста, вставьте ответ от собеседника');
+                    return;
+                }
+
+                log('🔗 Устанавливаю соединение с ответом...');
+
+                const answerJson = decodeURIComponent(escape(atob(answerBase64)));
+                const answer = JSON.parse(answerJson);
+
+                remotePublicKey = await importPublicKey(answer.publicKey);
+                log('✅ Публичный RSA ключ собеседника импортирован');
+                updateEncryptionStatus('🔑 Публичный ключ собеседника получен', 'info');
+
+                await peerConnection.setRemoteDescription(answer.sdp);
+                log('📝 Remote description установлена');
+
+                for (const candidate of answer.candidates) {
+                    await peerConnection.addIceCandidate(candidate);
+                }
+                log('✅ ICE кандидаты добавлены (' + answer.candidates.length + ')');
+
+                if (dataChannel && dataChannel.readyState === 'open') {
+                    log('📤 Data channel открыт, отправляю симметричный ключ...');
+                    await sendSymmetricKey(dataChannel);
+                } else {
+                    log('⏳ Жду открытия data channel перед отправкой ключа...');
+                }
+
+                updateStatus('✅ Соединение установлено!', 'success');
+                connectBtn.disabled = true;
+                answerText.disabled = true;
+
+            } catch (error) {
+                updateStatus('❌ Ошибка подключения: ' + error.message, 'error');
+                log('❌ Ошибка подключения: ' + error.message);
+                console.error(error);
+            }
         }
-    }
 
-    function setupRemoteAudioProcessing(stream) {
-        if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        if (remoteStreamSource) remoteStreamSource.disconnect();
-        remoteStreamSource = audioContext.createMediaStreamSource(stream);
-        remoteGainNode = audioContext.createGain();
-        remoteStreamSource.connect(remoteGainNode).connect(audioContext.destination);
-        handleReceiveVolumeChange();
-    }
-
-    function handleSendVolumeChange() {
-        if (localGainNode) localGainNode.gain.value = sendVolumeSlider.value / 100;
-        sendVolumeValue.textContent = `${sendVolumeSlider.value}%`;
-        localStorage.setItem('sendVolume', sendVolumeSlider.value);
-    }
-    function handleReceiveVolumeChange() {
-        if (remoteGainNode) remoteGainNode.gain.value = receiveVolumeSlider.value / 100;
-        receiveVolumeValue.textContent = `${receiveVolumeSlider.value}%`;
-        localStorage.setItem('receiveVolume', receiveVolumeSlider.value);
-    }
-
-    sendVolumeSlider.addEventListener('input', handleSendVolumeChange);
-    receiveVolumeSlider.addEventListener('input', handleReceiveVolumeChange);
-    
-    // --- Call Actions ---
-    toggleMuteBtn.onclick = () => {
-        if (!localStream) return;
-        isMuted = !isMuted;
-        localStream.getAudioTracks()[0].enabled = !isMuted;
-        toggleMuteBtn.textContent = isMuted ? 'Включить микрофон' : 'Выключить микрофон';
-        toggleMuteBtn.style.backgroundColor = isMuted ? 'var(--accent-orange)' : 'var(--accent-green)';
-    };
-
-    disconnectBtn.onclick = () => {
-        encryptAndSend({ type: 'disconnect' }).finally(() => setTimeout(forceDisconnect, 200));
-    };
-
-    function forceDisconnect() {
-        clearTimeout(connectionTimeout);
-        if (localStream) localStream.getTracks().forEach(track => track.stop());
-        if (peerConnection) peerConnection.close();
-        if (audioContext && audioContext.state !== 'closed') { audioContext.close(); audioContext = null; }
-        remoteAudio.srcObject = null;
-        statusEl.textContent = 'Звонок завершен.';
-        statusEl.style.color = 'var(--accent-orange)';
-        connectionCardEl.hidden = false; inCallControlsEl.hidden = true;
-        chatArea.innerHTML = ''; 
-        resetFileTransferUI();
-        revokeDownloadLink();
-        cryptoReady = false; myIdentityKeys = null; peerIdentityKey = null;
-    }
-
-    // --- Chat Functions ---
-    function appendMessage(msg, className) {
-        const bubble = document.createElement('div');
-        bubble.className = `message-bubble ${className}`;
-        const content = document.createElement('div');
-        content.className = 'message-content';
-        content.textContent = msg;
-        const meta = document.createElement('div');
-        meta.className = 'message-meta';
-        const time = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-        const timeSpan = document.createElement('span');
-        timeSpan.textContent = time;
-        const copyBtn = document.createElement('span');
-        copyBtn.className = 'copy-btn';
-        copyBtn.innerHTML = '&#x2398;'; copyBtn.title = 'Копировать';
-        copyBtn.onclick = () => navigator.clipboard.writeText(msg).then(() => {
-            copyBtn.innerHTML = '&#x2713;'; setTimeout(() => { copyBtn.innerHTML = '&#x2398;'; }, 1500);
-        });
-        meta.appendChild(timeSpan); meta.appendChild(copyBtn);
-        bubble.appendChild(content); bubble.appendChild(meta);
-        chatArea.appendChild(bubble);
-        chatArea.scrollTop = chatArea.scrollHeight;
-    }
-
-    sendMsgBtn.onclick = () => {
-        const msg = chatInput.value.trim();
-        if (msg && dataChannel && dataChannel.readyState === 'open') {
-            encryptAndSend({ type: 'chat', value: msg });
-            appendMessage(msg, 'my-message');
-            chatInput.value = '';
+        function copyOffer() {
+            offerText.select();
+            document.execCommand('copy');
+            updateStatus('📋 Предложение скопировано в буфер обмена!', 'success');
+            log('✅ Предложение скопировано');
         }
-    };
-    chatInput.addEventListener('keypress', (e) => e.key === 'Enter' && sendMsgBtn.click());
 
-    // --- File Transfer Functions ---
-    let fileToSend;
-    sendFileBtn.onclick = async () => {
-        fileToSend = fileInput.files[0];
-        if (!fileToSend) { fileTransferInfo.textContent = 'Сначала выберите файл.'; return; }
-        
-        isTransferCancelled = false;
-        sendFileBtn.hidden = true; cancelFileTransferBtn.hidden = false; fileInput.disabled = true;
-        fileTransferInfo.textContent = `Расчет хэша: 0%`;
-
-        try {
-            const checksum = await calculateChecksum(fileToSend, (p) => { fileTransferInfo.textContent = `Расчет хэша: ${p.toFixed(0)}%`; });
-            if (isTransferCancelled) return;
+        function stopConnection() {
+            log('🛑 Останавливаю соединение...');
             
-            await encryptAndSend({ type: 'file-start', name: fileToSend.name, size: fileToSend.size, checksum });
-            fileTransferInfo.textContent = 'Ожидание подтверждения от получателя...';
-        } catch (error) {
-            if (error.message === 'Cancelled') { resetFileTransferUI(true); fileTransferInfo.textContent = 'Расчет хэша отменен.'; }
-            else { console.error("Ошибка при расчете хэша:", error); fileTransferInfo.textContent = "Ошибка при расчете хэша."; resetFileTransferUI(true); }
-        }
-    };
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+            if (dataChannel) {
+                dataChannel.close();
+                dataChannel = null;
+            }
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
 
-    function sendFileChunks() {
-        let offset = 0;
-        transferStartTime = new Date().getTime();
-        const sendChunk = () => {
-            if (isTransferCancelled || offset >= fileToSend.size) {
-                if(!isTransferCancelled) fileTransferInfo.textContent = `Файл ${fileToSend.name} отправлен.`;
-                resetFileTransferUI(true);
+            remoteAudio.srcObject = null;
+            offerText.value = '';
+            answerText.value = '';
+            
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            copyOfferBtn.disabled = true;
+            connectBtn.disabled = true;
+            muteBtn.disabled = true;
+            volumeBtn.disabled = true;
+            messageInput.disabled = true;
+            sendMessageBtn.disabled = true;
+            fileInput.disabled = true;
+            sendFileBtn.disabled = true;
+            answerText.disabled = false;
+
+            publicKey = null;
+            privateKey = null;
+            remotePublicKey = null;
+            symmetricKey = null;
+            keyExchangeComplete = false;
+            isInitiator = false;
+
+            updateStatus('⚠️ Соединение завершено', 'info');
+            updateEncryptionStatus('❌ Шифрование не активировано', 'info');
+            log('✅ Соединение полностью завершено');
+        }
+
+        function toggleMute() {
+            if (localStream) {
+                const audioTrack = localStream.getAudioTracks()[0];
+                isMuted = !isMuted;
+                audioTrack.enabled = !isMuted;
+                muteBtn.textContent = isMuted ? '🔴 Включить микрофон' : '🎤 Выключить микрофон';
+                log(isMuted ? '🔴 Микрофон выключен' : '🎤 Микрофон включен');
+            }
+        }
+
+        function toggleVolume() {
+            volumeLevel = volumeLevel === 1.0 ? 0.5 : (volumeLevel === 0.5 ? 0.0 : 1.0);
+            remoteAudio.volume = volumeLevel;
+            volumeBtn.textContent = `🔊 Громкость: ${Math.round(volumeLevel * 100)}%`;
+            log('🔊 Громкость: ' + Math.round(volumeLevel * 100) + '%');
+        }
+
+        // ===== ЧАТ =====
+        async function sendMessage() {
+            const message = messageInput.value.trim();
+            if (!message) return;
+            
+            if (!dataChannel || dataChannel.readyState !== 'open') {
+                log('❌ Data channel не открыт');
                 return;
             }
-            if (dataChannel.bufferedAmount > 1024 * 1024) { setTimeout(sendChunk, 100); return; }
             
-            const slice = fileToSend.slice(offset, offset + CHUNK_SIZE);
+            if (!keyExchangeComplete || !symmetricKey) {
+                log('❌ Шифрование еще не активировано');
+                return;
+            }
+
+            try {
+                const encrypted = await encryptData(message, symmetricKey);
+                const msgData = JSON.stringify({
+                    type: 'chat',
+                    data: encrypted
+                });
+                
+                dataChannel.send(msgData);
+                log('✅ Сообщение зашифровано и отправлено: ' + message.substring(0, 30) + '...');
+                displayMessage(message, 'sent');
+                messageInput.value = '';
+            } catch (error) {
+                log('❌ Ошибка отправки сообщения: ' + error.message);
+                console.error(error);
+            }
+        }
+
+        function displayMessage(text, type) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+            
+            const timeDiv = document.createElement('div');
+            timeDiv.className = 'time';
+            timeDiv.textContent = new Date().toLocaleTimeString();
+            
+            const textDiv = document.createElement('div');
+            textDiv.textContent = text;
+            
+            messageDiv.appendChild(timeDiv);
+            messageDiv.appendChild(textDiv);
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        // ===== ПЕРЕДАЧА ФАЙЛОВ =====
+        async function sendFile() {
+            const file = fileInput.files[0];
+            if (!file) return;
+
+            if (!dataChannel || dataChannel.readyState !== 'open') {
+                log('❌ Data channel не открыт');
+                return;
+            }
+            
+            if (!keyExchangeComplete || !symmetricKey) {
+                log('❌ Шифрование еще не активировано');
+                return;
+            }
+
+            log(`📤 Начинаю отправку файла: ${file.name} (${(file.size / 1024).toFixed(2)} KB)`);
+            sendFileBtn.disabled = true;
+
+            const fileId = Math.random().toString(36).substring(7);
+            const chunkSize = 16000;
+            const totalChunks = Math.ceil(file.size / chunkSize);
+
             const reader = new FileReader();
-            reader.onload = async e => {
-                if (dataChannel.readyState !== 'open' || isTransferCancelled) { resetFileTransferUI(true); return; }
+            
+            reader.onload = async (e) => {
                 try {
-                    await encryptAndSend(e.target.result, true);
-                    offset += e.target.result.byteLength;
-                    updateProgress(offset / fileToSend.size);
-                    const elapsedTime = (new Date().getTime() - transferStartTime) / 1000;
-                    const speed = offset / elapsedTime;
-                    fileTransferInfo.textContent = `Отправка: ${formatBytes(offset)} / ${formatBytes(fileToSend.size)} (${formatSpeed(speed)})`;
-                    sendChunk();
+                    const fullData = new Uint8Array(e.target.result);
+                    
+                    // Вычисляем MD5 всего файла
+                    const fileMD5 = calculateMD5FromArrayBuffer(fullData);
+                    log(`🔐 MD5 файла вычислен: ${fileMD5}`);
+                    
+                    // Отправляем информацию о файле
+                    const fileInfoEncrypted = await encryptData(
+                        JSON.stringify({
+                            type: 'file_start',
+                            name: file.name,
+                            size: file.size,
+                            mimeType: file.type,
+                            totalChunks: totalChunks,
+                            fileId: fileId,
+                            md5: fileMD5
+                        }),
+                        symmetricKey
+                    );
+                    
+                    dataChannel.send(JSON.stringify({
+                        type: 'file_info',
+                        data: fileInfoEncrypted
+                    }));
+                    
+                    log(`📋 Информация о файле отправлена (зашифрована AES-GCM, MD5: ${fileMD5.substring(0, 8)}...)`);
+                    addFileTransferUI(fileId, file.name, file.size, 'pending');
+                    
+                    // Отправляем chunks
+                    let sentChunks = 0;
+                    for (let i = 0; i < totalChunks; i++) {
+                        const start = i * chunkSize;
+                        const end = Math.min(start + chunkSize, file.size);
+                        const chunkData = fullData.slice(start, end);
+                        
+                        const chunkBase64 = arrayBufferToBase64(chunkData);
+                        const encrypted = await encryptData(chunkBase64, symmetricKey);
+                        
+                        dataChannel.send(JSON.stringify({
+                            type: 'file_chunk',
+                            fileId: fileId,
+                            chunkIndex: i,
+                            totalChunks: totalChunks,
+                            data: encrypted
+                        }));
+                        
+                        sentChunks++;
+                        const progress = Math.round((sentChunks / totalChunks) * 100);
+                        
+                        if (i % 10 === 0 || i === totalChunks - 1) {
+                            log(`📤 Отправка: ${progress}% (${sentChunks}/${totalChunks} chunks)`);
+                        }
+                        
+                        await new Promise(resolve => setTimeout(resolve, 5));
+                    }
+                    
+                    // Отправляем сигнал завершения
+                    const finishEncrypted = await encryptData(
+                        JSON.stringify({
+                            type: 'file_finish',
+                            fileId: fileId
+                        }),
+                        symmetricKey
+                    );
+                    
+                    dataChannel.send(JSON.stringify({
+                        type: 'file_complete',
+                        data: finishEncrypted
+                    }));
+                    
+                    log(`✅ Файл полностью отправлен (зашифрован AES-GCM, проверка целостности: MD5)`);
+                    fileInput.value = '';
+                    
                 } catch (error) {
-                    console.error("Ошибка при отправке чанка:", error);
-                    fileTransferInfo.textContent = "Ошибка при отправке файла."; resetFileTransferUI(true);
+                    log('❌ Ошибка отправки файла: ' + error.message);
+                    console.error(error);
+                } finally {
+                    sendFileBtn.disabled = false;
                 }
             };
-            reader.readAsArrayBuffer(slice);
-        };
-        sendChunk();
-    }
+            
+            reader.onerror = () => {
+                log('❌ Ошибка чтения файла');
+                sendFileBtn.disabled = false;
+            };
+            
+            reader.readAsArrayBuffer(file);
+        }
 
-    function promptToAcceptFile(fileMeta) {
-        fileTransferInfo.innerHTML = `Входящий файл: <strong>${fileMeta.name}</strong> (${formatBytes(fileMeta.size)}) <br>`;
-        const buttonContainer = document.createElement('div');
-        buttonContainer.className = 'action-buttons'; buttonContainer.style.display = 'flex'; buttonContainer.style.gap = '10px';
-        const acceptBtn = document.createElement('button');
-        acceptBtn.textContent = 'Принять';
-        acceptBtn.onclick = async () => {
-            if ('showSaveFilePicker' in window) {
-                try {
-                    receivedFileHandle = await window.showSaveFilePicker({ suggestedName: fileMeta.name });
-                    fileWriter = await receivedFileHandle.createWritable();
-                    await encryptAndSend({ type: 'file-accept' });
-                    fileTransferInfo.textContent = `Получение файла: ${fileMeta.name}...`;
-                } catch (err) {
-                    if (err.name === 'AbortError') {
-                        await encryptAndSend({ type: 'file-reject' });
-                        fileTransferInfo.textContent = 'Вы отменили прием файла.';
-                    } else { console.error("Ошибка showSaveFilePicker:", err); fileTransferInfo.textContent = 'Ошибка: не удалось открыть окно сохранения.'; }
+        async function receiveFileChunk(message) {
+            try {
+                const data = message.data;
+                const fileId = message.fileId;
+                const chunkIndex = message.chunkIndex;
+                const totalChunks = message.totalChunks;
+                
+                if (!fileReceivers[fileId]) {
+                    fileReceivers[fileId] = {
+                        chunks: new Array(totalChunks),
+                        received: 0,
+                        startTime: Date.now()
+                    };
                 }
-            } else {
-                receiveBuffer = [];
-                await encryptAndSend({ type: 'file-accept' });
-                fileTransferInfo.textContent = `Получение файла (в RAM): ${fileMeta.name}...`;
+                
+                const decrypted = await decryptData(data, symmetricKey);
+                fileReceivers[fileId].chunks[chunkIndex] = decrypted;
+                fileReceivers[fileId].received++;
+                
+                const progress = Math.round((fileReceivers[fileId].received / totalChunks) * 100);
+                
+                if (chunkIndex % 10 === 0 || progress === 100) {
+                    log(`📥 Получение: ${progress}% (${fileReceivers[fileId].received}/${totalChunks})`);
+                }
+                
+            } catch (error) {
+                log('❌ Ошибка получения chunk: ' + error.message);
+                console.error(error);
             }
-        };
-        const rejectBtn = document.createElement('button');
-        rejectBtn.textContent = 'Отклонить'; rejectBtn.style.backgroundColor = 'var(--accent-orange)';
-        rejectBtn.onclick = async () => {
-            await encryptAndSend({ type: 'file-reject' });
-            fileTransferInfo.textContent = 'Вы отклонили файл.';
-        };
-        buttonContainer.appendChild(acceptBtn); buttonContainer.appendChild(rejectBtn); fileTransferInfo.appendChild(buttonContainer);
-    }
-    
-    cancelFileTransferBtn.onclick = () => {
-        isTransferCancelled = true;
-        if (dataChannel && dataChannel.readyState === 'open' && cryptoReady) {
-            encryptAndSend({ type: 'file-cancel' });
         }
-        resetFileTransferUI(true);
-        fileTransferInfo.textContent = 'Передача файла отменена.';
-    };
 
-    function resetFileTransferUI(isSender = false) {
-        updateProgress(0);
-        if (isSender || !fileTransferInfo.innerHTML.includes('<a href')) { fileTransferInfo.textContent = ''; }
-        sendFileBtn.hidden = false; cancelFileTransferBtn.hidden = true;
-        fileInput.disabled = false; fileInput.value = ''; fileToSend = null;
-    }
-
-    function updateProgress(progress) {
-        const percent = Math.round(progress * 100);
-        progressBar.style.width = `${percent}%`;
-        progressBar.textContent = `${percent}%`;
-    }
-
-    async function calculateChecksum(fileOrBlob, onProgress = () => {}) {
-        return new Promise((resolve, reject) => {
-            const hash = sha256.create();
-            const reader = fileOrBlob.stream().getReader();
-            let bytesRead = 0; const totalBytes = fileOrBlob.size;
-            function processChunk() {
-                if (isTransferCancelled) { reject(new Error('Cancelled')); return; }
-                reader.read().then(({ done, value }) => {
-                    if (done) { onProgress(100); resolve(hash.hex()); return; }
-                    bytesRead += value.length;
-                    hash.update(value);
-                    onProgress((bytesRead / totalBytes) * 100);
-                    setTimeout(processChunk, 0); 
-                }).catch(reject);
+        async function assembleAndVerifyFile(fileId) {
+            try {
+                const receiver = fileReceivers[fileId];
+                log(`🔧 Собираю файл: ${receiver.name}...`);
+                
+                let binary = '';
+                for (let i = 0; i < receiver.chunks.length; i++) {
+                    const chunkBinary = atob(receiver.chunks[i]);
+                    binary += chunkBinary;
+                }
+                
+                const bytes = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) {
+                    bytes[i] = binary.charCodeAt(i);
+                }
+                
+                // Вычисляем MD5 полученного файла
+                const calculatedMD5 = calculateMD5FromArrayBuffer(bytes.buffer);
+                log(`🔐 MD5 полученного файла: ${calculatedMD5}`);
+                
+                // Проверяем целостность
+                if (calculatedMD5 !== receiver.expectedMD5) {
+                    log(`❌ ОШИБКА ЦЕЛОСТНОСТИ! Ожидалось: ${receiver.expectedMD5}, получено: ${calculatedMD5}`);
+                    updateFileTransferUI(fileId, 'error', `Ошибка целостности! MD5 не совпадает`);
+                    delete fileReceivers[fileId];
+                    return;
+                }
+                
+                log(`✅ Проверка целостности пройдена! MD5 совпадает`);
+                
+                // Файл целостен, сохраняем его
+                const blob = new Blob([bytes], { type: receiver.mimeType || 'application/octet-stream' });
+                const url = URL.createObjectURL(blob);
+                
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = receiver.name;
+                a.click();
+                
+                const elapsed = ((Date.now() - receiver.startTime) / 1000).toFixed(2);
+                const speed = (receiver.size / 1024 / elapsed).toFixed(2);
+                
+                log(`✅ Файл успешно загружен и сохранён (${(receiver.size / 1024).toFixed(2)} KB за ${elapsed}s, ${speed} KB/s)`);
+                log(`🔐 Файл был зашифрован: RSA-OAEP (обмен ключами) + AES-GCM 256 (данные)`);
+                log(`✅ Проверка целостности: MD5`);
+                
+                updateFileTransferUI(fileId, 'success', `✅ MD5: ${calculatedMD5.substring(0, 16)}...`);
+                delete fileReceivers[fileId];
+                
+            } catch (error) {
+                log('❌ Ошибка сборки/проверки файла: ' + error.message);
+                console.error(error);
+                updateFileTransferUI(fileId, 'error', error.message);
             }
-            processChunk();
+        }
+
+        function addFileTransferUI(fileId, name, size, status) {
+            const transferDiv = document.createElement('div');
+            transferDiv.id = `file-${fileId}`;
+            transferDiv.className = `file-transfer ${status}`;
+            
+            const nameDiv = document.createElement('div');
+            nameDiv.textContent = `📦 ${name} (${(size / 1024).toFixed(2)} KB)`;
+            
+            const progressDiv = document.createElement('div');
+            progressDiv.className = 'progress-bar';
+            const progressFill = document.createElement('div');
+            progressFill.className = 'progress-fill';
+            progressDiv.appendChild(progressFill);
+            
+            transferDiv.appendChild(nameDiv);
+            transferDiv.appendChild(progressDiv);
+            
+            fileTransfers.appendChild(transferDiv);
+        }
+
+        function updateFileTransferUI(fileId, status, info) {
+            const fileElement = document.getElementById(`file-${fileId}`);
+            if (fileElement) {
+                fileElement.className = `file-transfer ${status}`;
+                if (info) {
+                    const hashDiv = document.createElement('div');
+                    hashDiv.className = 'file-hash';
+                    hashDiv.textContent = info;
+                    fileElement.appendChild(hashDiv);
+                }
+            }
+        }
+
+        // ===== ОБРАБОТЧИКИ СОБЫТИЙ =====
+        startBtn.addEventListener('click', startConnection);
+        stopBtn.addEventListener('click', stopConnection);
+        copyOfferBtn.addEventListener('click', copyOffer);
+        connectBtn.addEventListener('click', connectWithAnswer);
+        muteBtn.addEventListener('click', toggleMute);
+        volumeBtn.addEventListener('click', toggleVolume);
+        sendMessageBtn.addEventListener('click', sendMessage);
+        sendFileBtn.addEventListener('click', sendFile);
+
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
         });
-    }
-    
-    function revokeDownloadLink() {
-        if (currentDownloadUrl) {
-            URL.revokeObjectURL(currentDownloadUrl);
-            currentDownloadUrl = null;
-            console.log("Ссылка на скачанный файл и связанная память очищены.");
-        }
-    }
 
-    // --- Utility Functions ---
-    function formatBytes(bytes) {
-        if (bytes === 0) return '0 Bytes';
-        const k = 1024; const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-    }
-    function formatSpeed(bytesPerSecond) { return formatBytes(bytesPerSecond) + '/s'; }
-</script>
+        // Автоматическая обработка вставки ответа
+        answerText.addEventListener('input', async function() {
+            if (this.value && !peerConnection) {
+                try {
+                    isInitiator = false;
+                    log('🚀 Стартую как респондент соединения...');
+                    
+                    const offerBase64 = this.value.trim();
+                    const offerJson = decodeURIComponent(escape(atob(offerBase64)));
+                    const offer = JSON.parse(offerJson);
+
+                    const keyPair = await generateKeyPair();
+                    publicKey = keyPair.publicKey;
+                    privateKey = keyPair.privateKey;
+                    remotePublicKey = await importPublicKey(offer.publicKey);
+                    log('✅ RSA-OAEP ключи сгенерированы, публичный ключ собеседника импортирован');
+                    
+                    updateEncryptionStatus('🔑 Ключи готовы', 'info');
+
+                    localStream = await navigator.mediaDevices.getUserMedia({
+                        audio: {
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            autoGainControl: true,
+                            sampleRate: 48000,
+                            channelCount: 2
+                        },
+                        video: false
+                    });
+                    log('✅ Микрофон активирован');
+
+                    peerConnection = new RTCPeerConnection(rtcConfig);
+                    
+                    localStream.getTracks().forEach(track => {
+                        peerConnection.addTrack(track, localStream);
+                    });
+
+                    const transceivers = peerConnection.getTransceivers();
+                    transceivers.forEach(transceiver => {
+                        if (transceiver.sender && transceiver.sender.track && transceiver.sender.track.kind === 'audio') {
+                            const parameters = transceiver.sender.getParameters();
+                            if (!parameters.encodings) {
+                                parameters.encodings = [{}];
+                            }
+                            parameters.encodings[0].maxBitrate = 510000;
+                            transceiver.sender.setParameters(parameters);
+                        }
+                    });
+
+                    peerConnection.ondatachannel = (event) => {
+                        log('📡 Data channel получен');
+                        dataChannel = event.channel;
+                        setupDataChannel(dataChannel);
+                    };
+
+                    peerConnection.ontrack = (event) => {
+                        log('✅ Входящий аудиопоток получен');
+                        remoteAudio.srcObject = event.streams[0];
+                    };
+
+                    await peerConnection.setRemoteDescription(offer.sdp);
+                    log('📝 Remote description установлена');
+
+                    for (const candidate of offer.candidates) {
+                        await peerConnection.addIceCandidate(candidate);
+                    }
+                    log('✅ ICE кандидаты добавлены');
+
+                    let iceCandidates = [];
+                    peerConnection.onicecandidate = (event) => {
+                        if (event.candidate) {
+                            iceCandidates.push(event.candidate);
+                        }
+                    };
+
+                    peerConnection.onicegatheringstatechange = async () => {
+                        if (peerConnection.iceGatheringState === 'complete') {
+                            log('✅ ICE кандидаты собраны');
+                            const publicKeyStr = await exportPublicKey(publicKey);
+                            const answer = {
+                                sdp: peerConnection.localDescription,
+                                publicKey: publicKeyStr,
+                                candidates: iceCandidates
+                            };
+                            
+                            const answerJson = JSON.stringify(answer);
+                            const answerBase64 = btoa(unescape(encodeURIComponent(answerJson)));
+                            offerText.value = answerBase64;
+                            copyOfferBtn.disabled = false;
+                            
+                            updateStatus('✅ Ответ создан. Отправьте его инициатору!', 'success');
+                            startBtn.disabled = true;
+                            stopBtn.disabled = false;
+                            muteBtn.disabled = false;
+                            volumeBtn.disabled = false;
+                            this.disabled = true;
+                        }
+                    };
+
+                    const answer = await peerConnection.createAnswer();
+                    await peerConnection.setLocalDescription(answer);
+                    log('📝 Answer создан');
+
+                    updateStatus('⏳ Создание ответа...', 'info');
+
+                } catch (error) {
+                    log('❌ Ошибка создания ответа: ' + error.message);
+                    console.error(error);
+                }
+            }
+        });
+
+        log('🚀 Приложение загружено. P2P соединение с end-to-end шифрованием готово.');
+        log('🔐 Безопасность: RSA-OAEP 2048 (обмен ключами) + AES-GCM 256 (данные) + MD5 (проверка целостности)');
+    </script>
 </body>
 </html>
-
-
-
